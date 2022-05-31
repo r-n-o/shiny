@@ -10,24 +10,36 @@ import UIKit
 import os
 
 class SignInViewController: UIViewController {
+    @IBOutlet weak var userNameLabel: UILabel!
     @IBOutlet weak var userNameField: UITextField!
-    
-    private var observer: NSObjectProtocol?
+    @IBOutlet weak var passwordLabel: UILabel!
+    @IBOutlet weak var passwordField: UITextField!
+
+    private var signInObserver: NSObjectProtocol?
+    private var signInErrorObserver: NSObjectProtocol?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
-        observer = NotificationCenter.default.addObserver(forName: .UserSignedIn, object: nil, queue: nil) {_ in
+        signInObserver = NotificationCenter.default.addObserver(forName: .UserSignedIn, object: nil, queue: nil) {_ in
             self.didFinishSignIn()
         }
 
+        signInErrorObserver = NotificationCenter.default.addObserver(forName: .ModalSignInSheetCanceled, object: nil, queue: nil) { _ in
+            self.showSignInForm()
+        }
+
         guard let window = self.view.window else { fatalError("The view was not in the app's view hierarchy!") }
-        (UIApplication.shared.delegate as? AppDelegate)?.accountManager.signInWith(anchor: window)
+        (UIApplication.shared.delegate as? AppDelegate)?.accountManager.signInWith(anchor: window, preferImmediatelyAvailableCredentials: true)
     }
     
     override func viewDidDisappear(_ animated: Bool) {
-        if let observer = observer {
-            NotificationCenter.default.removeObserver(observer)
+        if let signInObserver = signInObserver {
+            NotificationCenter.default.removeObserver(signInObserver)
+        }
+
+        if let signInErrorObserver = signInErrorObserver {
+            NotificationCenter.default.removeObserver(signInErrorObserver)
         }
         
         super.viewDidDisappear(animated)
@@ -41,6 +53,16 @@ class SignInViewController: UIViewController {
 
         guard let window = self.view.window else { fatalError("The view was not in the app's view hierarchy!") }
         (UIApplication.shared.delegate as? AppDelegate)?.accountManager.signUpWith(userName: userName, anchor: window)
+    }
+
+    func showSignInForm() {
+        userNameLabel.isHidden = false
+        userNameField.isHidden = false
+        passwordLabel.isHidden = false
+        passwordField.isHidden = false
+
+        guard let window = self.view.window else { fatalError("The view was not in the app's view hierarchy!") }
+        (UIApplication.shared.delegate as? AppDelegate)?.accountManager.beginAutoFillAssistedPasskeySignIn(anchor: window)
     }
 
     func didFinishSignIn() {

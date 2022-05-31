@@ -11,37 +11,69 @@ import os
 
 extension NSNotification.Name {
     static let UserSignedIn = Notification.Name("UserSignedInNotification")
+    static let ModalSignInSheetCanceled = Notification.Name("ModalSignInSheetCanceledNotification")
 }
 
 class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProviding, ASAuthorizationControllerDelegate {
     let domain = "example.com"
     var authenticationAnchor: ASPresentationAnchor?
+    var isPerformingModalReqest = false
 
-    func signInWith(anchor: ASPresentationAnchor) {
+    func signInWith(anchor: ASPresentationAnchor, preferImmediatelyAvailableCredentials: Bool) {
         self.authenticationAnchor = anchor
         let publicKeyCredentialProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: domain)
 
-        // Fetch the challenge the server. The challengs should be unique for every request.
+        // Fetch the challenge from the server. The challenge needs to be unique for each request.
         let challenge = Data()
 
         let assertionRequest = publicKeyCredentialProvider.createCredentialAssertionRequest(challenge: challenge)
 
-        // Also allow the user to used a saved password, if they have one.
+        // Also allow the user to use a saved password, if they have one.
         let passwordCredentialProvider = ASAuthorizationPasswordProvider()
         let passwordRequest = passwordCredentialProvider.createRequest()
 
-        // Pass in any mix of supported sign in request types.
+        // Pass in any mix of supported sign-in request types.
         let authController = ASAuthorizationController(authorizationRequests: [ assertionRequest, passwordRequest ] )
         authController.delegate = self
         authController.presentationContextProvider = self
-        authController.performRequests()
+
+        if preferImmediatelyAvailableCredentials {
+            // If credentials are available, presents a modal sign-in sheet.
+            // If there are no locally saved credentials, no UI appears and
+            // the system passes ASAuthorizationError.Code.canceled to call
+            // `AccountManager.authorizationController(controller:didCompleteWithError:)`.
+            authController.performRequests(options: .preferImmediatelyAvailableCredentials)
+        } else {
+            // If credentials are available, presents a modal sign-in sheet.
+            // If there are no locally saved credentials, the system presents a QR code to allow signing in with a
+            // passkey from a nearby device.
+            authController.performRequests()
+        }
+
+        isPerformingModalReqest = true
+    }
+
+    func beginAutoFillAssistedPasskeySignIn(anchor: ASPresentationAnchor) {
+        self.authenticationAnchor = anchor
+
+        let publicKeyCredentialProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: domain)
+
+        // Fetch the challenge from the server. The challenge needs to be unique for each request.
+        let challenge = Data()
+        let assertionRequest = publicKeyCredentialProvider.createCredentialAssertionRequest(challenge: challenge)
+
+        // AutoFill-assisted requests only support ASAuthorizationPlatformPublicKeyCredentialAssertionRequest.
+        let authController = ASAuthorizationController(authorizationRequests: [ assertionRequest ] )
+        authController.delegate = self
+        authController.presentationContextProvider = self
+        authController.performAutoFillAssistedRequests()
     }
     
     func signUpWith(userName: String, anchor: ASPresentationAnchor) {
         self.authenticationAnchor = anchor
         let publicKeyCredentialProvider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: domain)
 
-        // Fetch the challenge the server. The challengs should be unique for every request.
+        // Fetch the challenge from the server. The challenge needs to be unique for each request.
         // The userID is the identifier for the user's account.
         let challenge = Data()
         let userID = Data(UUID().uuidString.utf8)
@@ -49,64 +81,74 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
         let registrationRequest = publicKeyCredentialProvider.createCredentialRegistrationRequest(challenge: challenge,
                                                                                                   name: userName, userID: userID)
 
-        // Only ASAuthorizationPlatformPublicKeyCredentialRegistrationRequests or
-        // ASAuthorizationSecurityKeyPublicKeyCredentialRegistrationRequests should be used here.
+        // Use only ASAuthorizationPlatformPublicKeyCredentialRegistrationRequests or
+        // ASAuthorizationSecurityKeyPublicKeyCredentialRegistrationRequests here.
         let authController = ASAuthorizationController(authorizationRequests: [ registrationRequest ] )
         authController.delegate = self
         authController.presentationContextProvider = self
         authController.performRequests()
+        isPerformingModalReqest = true
     }
     
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         let logger = Logger()
         switch authorization.credential {
         case let credentialRegistration as ASAuthorizationPlatformPublicKeyCredentialRegistration:
-            logger.log("A new credential was registered: \(credentialRegistration)")
+            logger.log("A new passkey was registered: \(credentialRegistration)")
             // Verify the attestationObject and clientDataJSON with your service.
-            // The attestationObject contains the user's new public key, which should be stored and used for subsequent sign ins.
+            // The attestationObject contains the user's new public key to store and use for subsequent sign-ins.
             // let attestationObject = credentialRegistration.rawAttestationObject
             // let clientDataJSON = credentialRegistration.rawClientDataJSON
 
-            // After the server has verified the registration and created the user account, sign the user in with the new account.
+            // After the server verifies the registration and creates the user account, sign in the user with the new account.
             didFinishSignIn()
         case let credentialAssertion as ASAuthorizationPlatformPublicKeyCredentialAssertion:
-            logger.log("A credential was used to authenticate: \(credentialAssertion)")
+            logger.log("A passkey was used to sign in: \(credentialAssertion)")
             // Verify the below signature and clientDataJSON with your service for the given userID.
             // let signature = credentialAssertion.signature
             // let clientDataJSON = credentialAssertion.rawClientDataJSON
             // let userID = credentialAssertion.userID
 
-            // After the server has verified the assertion, sign the user in.
+            // After the server verifies the assertion, sign in the user.
             didFinishSignIn()
         case let passwordCredential as ASPasswordCredential:
-            logger.log("A passwordCredential was provided: \(passwordCredential)")
+            logger.log("A password was provided: \(passwordCredential)")
             // Verify the userName and password with your service.
             // let userName = passwordCredential.user
             // let password = passwordCredential.password
 
-            // After the server has verified the userName and password, sign the user in.
+            // After the server verifies the userName and password, sign in the user.
             didFinishSignIn()
         default:
             fatalError("Received unknown authorization type.")
         }
+
+        isPerformingModalReqest = false
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         let logger = Logger()
-        guard let authorizationError = ASAuthorizationError.Code(rawValue: (error as NSError).code) else {
+        guard let authorizationError = error as? ASAuthorizationError else {
+            isPerformingModalReqest = false
             logger.error("Unexpected authorization error: \(error.localizedDescription)")
             return
         }
 
-        if authorizationError == .canceled {
-            // Either no credentials were found and the request silently ended, or the user canceled the request.
-            // Consider asking the user to create an account.
+        if authorizationError.code == .canceled {
+            // Either the system doesn't find any credentials and the request ends silently, or the user cancels the request.
+            // This is a good time to show a traditional login form, or ask the user to create an account.
             logger.log("Request canceled.")
+
+            if isPerformingModalReqest {
+                didCancelModalSheet()
+            }
         } else {
-            // Other ASAuthorization error.
-            // The userInfo dictionary should contain useful information.
+            // Another ASAuthorization error.
+            // Note: The userInfo dictionary contains useful information.
             logger.error("Error: \((error as NSError).userInfo)")
         }
+
+        isPerformingModalReqest = false
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
@@ -115,6 +157,10 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
 
     func didFinishSignIn() {
         NotificationCenter.default.post(name: .UserSignedIn, object: nil)
+    }
+
+    func didCancelModalSheet() {
+        NotificationCenter.default.post(name: .ModalSignInSheetCanceled, object: nil)
     }
 }
 
