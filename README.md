@@ -1,6 +1,6 @@
-# Connecting to a service with passkeys
+# Shiny
 
-Allow users to sign in to a service without typing a password.
+This app is a native app based on the sample application at https://developer.apple.com/documentation/authenticationservices/connecting_to_a_service_with_passkeys
 
 ## Overview
 
