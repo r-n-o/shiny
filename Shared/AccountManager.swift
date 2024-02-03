@@ -17,7 +17,7 @@ extension NSNotification.Name {
 class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProviding, ASAuthorizationControllerDelegate {
     let domain = "shiny.tkhqlabs.xyz"
     var authenticationAnchor: ASPresentationAnchor?
-    var isPerformingModalReqest = false
+    var isPerformingModalRequest = false
 
     func signInWith(anchor: ASPresentationAnchor, preferImmediatelyAvailableCredentials: Bool) {
         self.authenticationAnchor = anchor
@@ -50,7 +50,7 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
             authController.performRequests()
         }
 
-        isPerformingModalReqest = true
+        isPerformingModalRequest = true
     }
 
     func beginAutoFillAssistedPasskeySignIn(anchor: ASPresentationAnchor) {
@@ -87,7 +87,7 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
         authController.delegate = self
         authController.presentationContextProvider = self
         authController.performRequests()
-        isPerformingModalReqest = true
+        isPerformingModalRequest = true
     }
     
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
@@ -123,23 +123,24 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
             fatalError("Received unknown authorization type.")
         }
 
-        isPerformingModalReqest = false
+        isPerformingModalRequest = false
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         let logger = Logger()
         guard let authorizationError = error as? ASAuthorizationError else {
-            isPerformingModalReqest = false
+            isPerformingModalRequest = false
             logger.error("Unexpected authorization error: \(error.localizedDescription)")
             return
         }
+        logger.log("Error: \(error)")
 
         if authorizationError.code == .canceled {
             // Either the system doesn't find any credentials and the request ends silently, or the user cancels the request.
             // This is a good time to show a traditional login form, or ask the user to create an account.
             logger.log("Request canceled.")
 
-            if isPerformingModalReqest {
+            if isPerformingModalRequest {
                 didCancelModalSheet()
             }
         } else {
@@ -148,7 +149,7 @@ class AccountManager: NSObject, ASAuthorizationControllerPresentationContextProv
             logger.error("Error: \((error as NSError).userInfo)")
         }
 
-        isPerformingModalReqest = false
+        isPerformingModalRequest = false
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
